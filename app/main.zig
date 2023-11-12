@@ -2,6 +2,11 @@ const std = @import("std");
 const stdout = std.io.getStdOut().writer();
 const allocator = std.heap.page_allocator;
 
+const DecodeResult = union(enum) {
+    str: *const []const u8,
+    int: *const i64,
+};
+
 pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
@@ -15,35 +20,38 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, command, "decode")) {
         const encodedStr = args[2];
-        const decodedStr = decodeBencode(encodedStr) catch {
+        const decoded = decodeBencode(encodedStr) catch {
             try stdout.print("Invalid encoded value\n", .{});
             std.os.exit(1);
         };
         var string = std.ArrayList(u8).init(allocator);
-        try std.json.stringify(decodedStr.*, .{}, string.writer());
+        defer string.deinit();
+        switch (decoded) {
+            .str => |value| try std.json.stringify(value.*, .{}, string.writer()),
+            .int => |value| try std.json.stringify(value.*, .{}, string.writer()),
+        }
         const jsonStr = try string.toOwnedSlice();
         try stdout.print("{s}\n", .{jsonStr});
     }
 }
 
-fn decodeBencode(encodedValue: []const u8) !*const []const u8 {
+fn decodeBencode(encodedValue: []const u8) !DecodeResult {
     if (encodedValue[0] >= '0' and encodedValue[0] <= '9') {
         const firstColon = std.mem.indexOf(u8, encodedValue, ":");
         if (firstColon == null) {
             return error.InvalidArgument;
         }
-        return &encodedValue[firstColon.? + 1 ..];
-    }
-    // Integers are encoded as i<number>e. For example, 52 is encoded as i52e and -52 is encoded as i-52e.
-    else if (encodedValue[0] == 'i') {
-        const end = std.mem.indexOf(u8, encodedValue, "e");
-        if (end == null) {
+        return DecodeResult{ .str = &encodedValue[firstColon.? + 1 ..] };
+    } else if (encodedValue[0] == 'i' and encodedValue[encodedValue.len - 1] == 'e') {
+        var intStr = encodedValue[1 .. encodedValue.len - 1];
+        var maybeInt = std.fmt.parseInt(i64, intStr, 10);
+        if (maybeInt) |value| {
+            return DecodeResult{ .int = &value };
+        } else |_| {
             return error.InvalidArgument;
         }
-        const numStr = &encodedValue[1..end.?];
-        return numStr;
     } else {
-        try stdout.print("Error.\n", .{});
+        try stdout.print("Only strings and integers are supported at the moment\n", .{});
         std.os.exit(1);
     }
 }
