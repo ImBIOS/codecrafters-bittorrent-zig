@@ -33,8 +33,17 @@ fn decodeBencode(encodedValue: []const u8) !*const []const u8 {
             return error.InvalidArgument;
         }
         return &encodedValue[firstColon.? + 1 ..];
+    }
+    // Integers are encoded as i<number>e. For example, 52 is encoded as i52e and -52 is encoded as i-52e.
+    else if (encodedValue[0] == 'i') {
+        const end = std.mem.indexOf(u8, encodedValue, "e");
+        if (end == null) {
+            return error.InvalidArgument;
+        }
+        const numStr = &encodedValue[1..end.?];
+        return numStr;
     } else {
-        try stdout.print("Only strings are supported at the moment\n", .{});
+        try stdout.print("Error.\n", .{});
         std.os.exit(1);
     }
 }
